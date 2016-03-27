@@ -1,0 +1,5 @@
+*.zip
+*.jar
+target/
+project/
+.idea/
