@@ -7,6 +7,7 @@ import akka.dispatch.sysmsg.Failed
 import com.galacticfog.gestalt.cli.control._
 import com.galacticfog.gestalt.meta.api.sdk._
 import com.galacticfog.gestalt.cli.Console
+import com.galacticfog.gestalt.cli.ShutdownHook
 import play.api.libs.json.Json
 import scala.util.{Success, Failure, Try}
 import joptsimple.OptionSet
@@ -188,12 +189,8 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   def start(input: List[String]): Unit = {
 
-    //TODO : need to fix this
-    /*
     val shutdown = new ShutdownHook
     shutdown.attach()
-    */
-
 
     setPs1(ps1)
     console.setPrompt(getPrompt)
