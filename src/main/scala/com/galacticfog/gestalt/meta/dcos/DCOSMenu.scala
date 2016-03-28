@@ -1,6 +1,7 @@
 package com.galacticfog.gestalt.meta.dcos
 
 import scala.util.{Failure, Success, Try}
+import com.galacticfog.gestalt.cli.Console
 
 /**
  * Simple CLI Menu component. Takes a Map[K,V] where K is the value you want
@@ -20,7 +21,7 @@ import scala.util.{Failure, Success, Try}
  * value choice = menu.choose()
  *
  */
-class DCOSMenu[T](data: Map[T, String], title: Option[String] = None) {
+class DCOSMenu[T](data: Map[T, String], title: Option[String] = None, console : Console) {
 
   if (data.isEmpty) throw new RuntimeException("Cannot build menu from empty Map.")
 
@@ -53,7 +54,8 @@ class DCOSMenu[T](data: Map[T, String], title: Option[String] = None) {
     // acc could be used to implement 'max_retries'.
     def go(valid: Boolean, acc: Int): T = {
       val choice = Try {
-        scala.io.StdIn.readLine(s">> Choose a number [1-$ubound]: ").toInt
+        //scala.io.StdIn.readLine(s">> Choose a number [1-$ubound]: ").toInt
+        console.readLine(s">> Choose a number [1-$ubound]: ").toInt
       } match {
         case Success(n) => if (1 to ubound contains n) Some(n) else None
         case Failure(_) => None
@@ -69,7 +71,7 @@ class DCOSMenu[T](data: Map[T, String], title: Option[String] = None) {
 }
 
 object DCOSMenu {
-  def apply[T](data: Map[T,String], title: Option[String] = None) = {
-    new DCOSMenu(data, title)
+  def apply[T](data: Map[T,String], title: Option[String] = None, console : Console) = {
+    new DCOSMenu(data, title, console)
   }
 }

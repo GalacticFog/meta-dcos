@@ -14,7 +14,6 @@ object MetaDCOS extends App {
 		parser.accepts("password").withOptionalArg
 		parser.accepts("meta-hostname").withOptionalArg
 		parser.accepts("meta-port").withOptionalArg
-		parser.accepts("env").withOptionalArg
 		parser.accepts("provider").withOptionalArg
 
 
@@ -24,34 +23,21 @@ object MetaDCOS extends App {
 
 	try {
 		args foreach { a => println("arg : " + a) }
-		login(args)
 
 		val cli = initConsole( opts )
 		cli.start(args.toList)
-
+		sys.exit(0)
 	}
 	catch {
 		case e: Throwable => {
 			e.printStackTrace
 			println("[fatal]: " + e.getMessage)
+			sys.exit(1)
 		}
-	}
-
-	def login(args: Array[String]) = {
-		true
 	}
 
 	def initConsole(opts : OptionSet) = {
 		new DCOSShell(new DefaultConsole, "meta-dcos ->", options = opts )
-	}
-
-
-	def showCommand(opts: OptionSet) = println {
-		"-" * 25 + 
-			"\nuser: %-10s\npassword: %-10s\nmeta: %-10s".format(
-					opts.valueOf("user"), 
-					opts.valueOf("password"), 
-					opts.valueOf("meta"))
 	}
 
 	object ParseState {

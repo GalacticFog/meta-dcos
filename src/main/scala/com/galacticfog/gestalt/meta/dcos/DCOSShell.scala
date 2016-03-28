@@ -3,6 +3,7 @@ package com.galacticfog.gestalt.meta.dcos
 import java.util.UUID
 
 
+import akka.dispatch.sysmsg.Failed
 import com.galacticfog.gestalt.cli.control._
 import com.galacticfog.gestalt.meta.api.sdk._
 import com.galacticfog.gestalt.cli.Console
@@ -74,9 +75,7 @@ abstract class Shell(console: Console) {
     }
     fmt.format(code, ps1)
   }
-
 }
-
 
 class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options : OptionSet) extends Shell(console) {
 
@@ -107,30 +106,89 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
   }
 
+  def getMetaOptions = {
+    if ( options.hasArgument( "meta-hostname" ) ) data.put( "metaHost", options.valuesOf( "meta-hostname" ).asScala.head.asInstanceOf[String] )
+    if ( options.hasArgument( "meta-port" ) )     data.put( "metaPort", options.valuesOf( "meta-port" ).asScala.head.asInstanceOf[String] )
+    if ( options.hasArgument( "user" ) )          data.put( "username", options.valuesOf( "user" ).asScala.head.asInstanceOf[String] )
+    if ( options.hasArgument( "password" ) )      data.put( "password", options.valuesOf( "password" ).asScala.head.asInstanceOf[String] )
+  }
+
+
+  val MAX_RETRIES = 5
+  def initMeta( numTries : Int ) : Meta = {
+
+    if( numTries > MAX_RETRIES )
+    {
+      throw new Exception( "Failed to init meta after " + MAX_RETRIES + " tries...")
+    }
+
+    val metaHost = data.get( "metaHost" ) getOrElse console.readLine( q( "meta-hostname" ) )
+    val metaPort = data.get( "metaPort" ) getOrElse console.readLine( q( "meta-port" ) )
+    val username = data.get( "username" ) getOrElse console.readLine( q( "user" ) )
+    val password = data.get( "password" ) getOrElse console.readLine( q( "password" ) )
+
+    //we'll use these later
+    data.put( "username", username )
+    data.put( "metaHost", metaHost )
+
+    val config = new HostConfig(
+      protocol = "http",
+      host = metaHost,
+      port = Some( metaPort.toLong ),
+      timeout = 40,
+      creds = Option( new BasicCredential( username = username, password = password ) )
+    )
+
+    val meta = new Meta(config)
+
+    //test the connection here, if it fails we're going to allow the user to manually enter the connection info
+    meta.topLevelOrgs match {
+      case Success( s ) => meta
+      case Failure( ex ) => {
+        println( "FAILED to init meta with the following error : " + ex.getMessage )
+
+        data.remove( "metaHost" )
+        data.remove( "metaPort" )
+        data.remove( "username" )
+        data.remove( "password" )
+
+        initMeta( numTries + 1 )
+      }
+    }
+  }
 
   def q(s: String) = s"[${green("?")}] ${s}: "
 
-  val metaHost : String = if( options.hasArgument( "meta-hostname" ) ) options.valuesOf( "meta-hostname" ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-hostname"))
-  val port : String     = if( options.hasArgument( "meta-port" ) ) options.valuesOf( "meta-port" ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-port"))
-  val username : String = if( options.hasArgument( "user" ) ) options.valuesOf( "user" ).asScala.head.asInstanceOf[String] else console.readLine(q("user"))
-  val password : String = if( options.hasArgument( "password" ) ) options.valuesOf( "password" ).asScala.head.asInstanceOf[String] else console.readLine(q("password"))
+  //allow a "one liner"
+  if( options.hasArgument( "provider" ) ) data.put( "provider", options.valuesOf( "provider" ).asScala.head.asInstanceOf[String] )
+  if( options.hasArgument( "environment" ) ) data.put( "environment", options.valuesOf( "environment" ).asScala.head.asInstanceOf[String] )
 
-  val config = new HostConfig(
-    protocol = "http",
-    host = metaHost,
-    port = Some(port.toLong),
-    timeout = 40,
-    creds = Option(new BasicCredential( username = username, password = password ))
-  )
+  getMetaOptions
 
-  val meta = new Meta(config)
+  val meta = initMeta( 0 )
 
   println(dcosBanner)
-  println("> Welcome, " + config.creds.get.username )
-  println("> Bound to: https://" + meta)
-  
-  
+  println("> Welcome, " + data.get( "username" ).get )
+  println("> Bound to: https://" + data.get("metaHost").get )
+
+
+  def wizardSelect = {
+    val currentIndex = 0
+    functions += ( 0 -> pickOrg )
+    functions += ( 1 -> pickWorkspace )
+    functions += ( 2 -> pickEnvironment )
+    functions += ( 3 -> pickProvider )
+    process( currentIndex )
+  }
+
+  def fqonSelect = {
+
+    //do the meta stuff required to select the oid, pid
+  }
+
   def start(input: List[String]): Unit = {
+
+    //TODO : need to fix this
     /*
     val shutdown = new ShutdownHook
     shutdown.attach()
@@ -140,25 +198,24 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     setPs1(ps1)
     console.setPrompt(getPrompt)
 
-    val currentIndex = 0
+    //if they passed us a provider, then skip all of this
+    if( !( data.get( "provider" ).isDefined && data.get( "environment").isDefined) )
+    {
+      wizardSelect
+    }
+    else
+    {
+      fqonSelect
+    }
 
-    functions += ( 0 -> pickOrg )
-    functions += ( 1 -> pickWorkspace )
-    functions += ( 2 -> pickEnvironment )
-    functions += ( 3 -> pickProvider )
+    val oid = UUID.fromString( data.get( "org" ).get )
+    val eid = UUID.fromString( data.get( "environment" ).get )
+    val pid = UUID.fromString( data.get( "provider" ).get )
 
-    process( currentIndex )
+    val providers = meta.providers(oid, "environment", eid, Some("Marathon"))
+    val providerResource = providers.get.filter(_.id == pid).head
 
-    //do something with the selected provider
-    //println( "DO THE NEXT THING HERE" )
-    val provider = data.get( "provider" ).get
-    //println( "provider : " + data.get( "provider" ).get )
-    val providerJson = Json.parse( data.get( "provider" ).get )
-    //println( "providerJson : " + Json.prettyPrint( providerJson ) )
-
-    val providerInstance = parseAs[ResourceInstance]( providerJson, "Provider instance not well formed" )
-
-    val providerPropertiesJson = providerInstance.properties.get.get( "config" ) getOrElse {
+    val providerPropertiesJson = providerResource.properties.get.get( "config" ) getOrElse {
       throw new Exception( "Provider instance not well formed" )
     }
 
@@ -177,7 +234,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   def pickOrg( index : Int ) : Int = {
 
     val orgdata = mkmap(meta.topLevelOrgs)(o => (o.id -> o.properties.get("fqon").as[String]))
-    val oid = DCOSMenu(orgdata, title = Some("Select an Org")).render.choose()
+    val oid = DCOSMenu(orgdata, title = Some("Select an Org"), console = console).render.choose()
     println("You chose: " + oid)
     data.put( "org", oid.toString )
 
@@ -198,7 +255,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
     else
     {
-      val wid = DCOSMenu(workspacedata, Some("Select a Workspace")).render.choose()
+      val wid = DCOSMenu(workspacedata, Some("Select a Workspace"), console = console).render.choose()
       println("You chose: " + wid)
       data.put( "workspace", wid.toString )
       index + 1
@@ -223,7 +280,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
     else
     {
-      val eid = DCOSMenu(envdata, Some("Select an Environment")).render.choose()
+      val eid = DCOSMenu(envdata, Some("Select an Environment"), console = console).render.choose()
       println("You chose : " + eid)
       data.put( "environment", eid.toString )
       index + 1
@@ -231,7 +288,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   }
 
   def pickProvider( index : Int ) : Int = {
-    data.put( "provider", "THE PROVIDER!!" )
 
     //TODO : error handling?
     val oid = UUID.fromString( data.get( "org" ).get )
@@ -250,11 +306,9 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
     else
     {
-      val pid = DCOSMenu(providerdata, Some("Select a Provider")).render.choose()
+      val pid = DCOSMenu(providerdata, Some("Select a Provider"), console = console).render.choose()
       println("You chose : " + pid)
-      val providerChoice = providers.get.filter(_.id == pid).head
-
-      data.put( "provider", Json.stringify(Json.toJson(providerChoice)))
+      data.put( "provider", pid.toString )
 
       index + 1
     }

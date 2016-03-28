@@ -68,8 +68,11 @@ libraryDependencies += "com.typesafe.scala-logging" %% "scala-logging" % "3.1.0"
 // ----------------------------------------------------------------------------
 
 libraryDependencies += "net.sf.jopt-simple" % "jopt-simple" % "4.3"
-libraryDependencies += "com.galacticfog" %% "gestalt-meta-sdk-scala" % "0.1.0-SNAPSHOT"
-libraryDependencies += "com.galacticfog" %% "gestalt-cli" % "1.0-SNAPSHOT"
-libraryDependencies += "com.galacticfog" %% "gestalt-utils" % "0.0.1-SNAPSHOT"
+libraryDependencies += "com.galacticfog" %% "gestalt-meta-sdk-scala" % "0.1.0-SNAPSHOT" withSources()
+libraryDependencies += "com.galacticfog" %% "gestalt-cli" % "1.0-SNAPSHOT" withSources()
+libraryDependencies += "com.galacticfog" %% "gestalt-utils" % "0.0.1-SNAPSHOT" withSources()
 
-
+assemblyMergeStrategy in assembly := {
+	case "META-INF/MANIFEST.MF"         => MergeStrategy.discard
+		case _                              => MergeStrategy.first
+}
