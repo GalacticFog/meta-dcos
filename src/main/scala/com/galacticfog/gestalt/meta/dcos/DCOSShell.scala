@@ -167,7 +167,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
     println( "SETTING PROVIDER URL : " + providerConfig.url )
 
-    val cmd = "dcos config set core.mesos_master_url " + providerConfig.url
+    val cmd = "dcos config set marathon.url " + providerConfig.url
     val output = cmd.!!
 
     println( "RESULTS : " + output )
