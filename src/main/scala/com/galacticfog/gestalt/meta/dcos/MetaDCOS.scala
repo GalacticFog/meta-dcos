@@ -12,8 +12,8 @@ object MetaDCOS extends App {
 	val parser = new OptionParser()
 		parser.accepts("user").withOptionalArg
 		parser.accepts("password").withOptionalArg
-		parser.accepts("meta").withOptionalArg
-		parser.accepts("port").withOptionalArg
+		parser.accepts("meta-hostname").withOptionalArg
+		parser.accepts("meta-port").withOptionalArg
 		parser.accepts("env").withOptionalArg
 		parser.accepts("provider").withOptionalArg
 
@@ -31,7 +31,10 @@ object MetaDCOS extends App {
 
 	}
 	catch {
-		case e: Throwable => println("[fatal]: " + e.getMessage)
+		case e: Throwable => {
+			e.printStackTrace
+			println("[fatal]: " + e.getMessage)
+		}
 	}
 
 	def login(args: Array[String]) = {

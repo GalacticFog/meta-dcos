@@ -2,12 +2,17 @@ package com.galacticfog.gestalt.meta.dcos
 
 import java.util.UUID
 
+
 import com.galacticfog.gestalt.cli.control._
 import com.galacticfog.gestalt.meta.api.sdk._
 import com.galacticfog.gestalt.cli.Console
+import play.api.libs.json.Json
 import scala.util.{Success, Failure, Try}
 import joptsimple.OptionSet
 import scala.collection.JavaConverters._
+import com.galacticfog.gestalt.utils.json.JsonUtils._
+import com.galacticfog.gestalt.cli.ShellUtils._
+import sys.process._
 
 
 object AnsiColor {
@@ -30,6 +35,13 @@ object AnsiColor {
   val None = "none"
 }
 
+case class ProviderAuth( scheme : String, username : String, password : String )
+case class ProviderConfig( url : String, auth : ProviderAuth )
+
+object JsonHelp {
+  implicit val providerAuthFormats = Json.format[ProviderAuth]
+  implicit val providerConfigFormats = Json.format[ProviderConfig]
+}
 
 abstract class Shell(console: Console) {
   var ps1: String = ">"
@@ -65,9 +77,20 @@ abstract class Shell(console: Console) {
 
 }
 
-import com.galacticfog.gestalt.cli.ShellUtils._
 
 class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options : OptionSet) extends Shell(console) {
+
+  val dcosBanner = darkgray("""
+'##::::'##'########'########:::'###:::::::::::::::'########::'######::'#######::'######::
+| ###::'###:##.....:... ##..:::'## ##:::::::::::::::##.... ##'##... ##'##.... ##'##... ##:
+| ####'####:##::::::::: ##::::'##:. ##::::::::::::::##:::: ##:##:::..::##:::: ##:##:::..::
+| ## ### ##:######::::: ##:::'##:::. ##::'#######:::##:::: ##:##:::::::##:::: ##. ######::
+| ##. #: ##:##...:::::: ##::::#########::........:::##:::: ##:##:::::::##:::: ##:..... ##:
+| ##:.:: ##:##::::::::: ##::::##.... ##:::::::::::::##:::: ##:##::: ##:##:::: ##'##::: ##:
+| ##:::: ##:########::: ##::::##:::: ##:::::::::::::########:. ######:. #######:. ######::
+|..:::::..:........::::..::::..:::::..:::::::::::::........:::......:::.......:::......:::
+""") toString
+
 
   var data = scala.collection.mutable.Map[String, String]()
   var functions = scala.collection.mutable.Map[Int, (Int) => Int]()
@@ -87,10 +110,8 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   def q(s: String) = s"[${green("?")}] ${s}: "
 
-  val metaString = "meta"
-
-  val metaHost : String = if( options.hasArgument( metaString ) ) options.valuesOf( metaString ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-url"))
-  val port : String     = if( options.hasArgument( "port" ) ) options.valuesOf( "port" ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-port"))
+  val metaHost : String = if( options.hasArgument( "meta-hostname" ) ) options.valuesOf( "meta-hostname" ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-hostname"))
+  val port : String     = if( options.hasArgument( "meta-port" ) ) options.valuesOf( "meta-port" ).asScala.head.asInstanceOf[String] else console.readLine(q("meta-port"))
   val username : String = if( options.hasArgument( "user" ) ) options.valuesOf( "user" ).asScala.head.asInstanceOf[String] else console.readLine(q("user"))
   val password : String = if( options.hasArgument( "password" ) ) options.valuesOf( "password" ).asScala.head.asInstanceOf[String] else console.readLine(q("password"))
 
@@ -104,7 +125,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   val meta = new Meta(config)
 
-  println(banner)
+  println(dcosBanner)
   println("> Welcome, " + config.creds.get.username )
   println("> Bound to: https://" + meta)
   
@@ -129,7 +150,28 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     process( currentIndex )
 
     //do something with the selected provider
-    println( "DO THE NEXT THING HERE" )
+    //println( "DO THE NEXT THING HERE" )
+    val provider = data.get( "provider" ).get
+    //println( "provider : " + data.get( "provider" ).get )
+    val providerJson = Json.parse( data.get( "provider" ).get )
+    //println( "providerJson : " + Json.prettyPrint( providerJson ) )
+
+    val providerInstance = parseAs[ResourceInstance]( providerJson, "Provider instance not well formed" )
+
+    val providerPropertiesJson = providerInstance.properties.get.get( "config" ) getOrElse {
+      throw new Exception( "Provider instance not well formed" )
+    }
+
+    import JsonHelp._
+    val providerConfig = parseAs[ProviderConfig]( providerPropertiesJson,  "Provider config not well formed" )
+
+    println( "SETTING PROVIDER URL : " + providerConfig.url )
+
+    val cmd = "dcos config set core.mesos_master_url " + providerConfig.url
+    val output = cmd.!!
+
+    println( "RESULTS : " + output )
+
   }
 
   def pickOrg( index : Int ) : Int = {
@@ -183,14 +225,39 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     {
       val eid = DCOSMenu(envdata, Some("Select an Environment")).render.choose()
       println("You chose : " + eid)
-      data.put( "enviornment", eid.toString )
+      data.put( "environment", eid.toString )
       index + 1
     }
   }
 
   def pickProvider( index : Int ) : Int = {
     data.put( "provider", "THE PROVIDER!!" )
-    index + 1
+
+    //TODO : error handling?
+    val oid = UUID.fromString( data.get( "org" ).get )
+    val eid = UUID.fromString( data.get( "environment" ).get )
+
+    val providers = meta.providers(oid, "environment", eid, Some("Marathon"))
+    val providerdata = mkmap(providers) { p =>
+      (p.id -> p.name)
+    }
+
+    if( providerdata.size == 0 )
+    {
+      println( "Environment contains no providers, please select a different provider" )
+      data.remove( "environment" )
+      index - 1
+    }
+    else
+    {
+      val pid = DCOSMenu(providerdata, Some("Select a Provider")).render.choose()
+      println("You chose : " + pid)
+      val providerChoice = providers.get.filter(_.id == pid).head
+
+      data.put( "provider", Json.stringify(Json.toJson(providerChoice)))
+
+      index + 1
+    }
   }
 
   def process( currentIndex : Int ): Unit =
