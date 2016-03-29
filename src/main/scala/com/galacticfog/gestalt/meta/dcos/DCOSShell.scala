@@ -92,8 +92,8 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 """) toString
 
 
-  var data = scala.collection.mutable.Map[String, String]()
-  var functions = scala.collection.mutable.Map[Int, (Int) => Int]()
+  val data = scala.collection.mutable.Map[String, String]()
+  val functions = scala.collection.mutable.Map[Int, (Int) => Int]()
   val MAX_RETRIES = 5
 
   //allow a "one liner"
@@ -139,11 +139,13 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     val metaHost = data.get( "metaHost" ) getOrElse console.readLine( q( "meta-hostname" ) )
     val metaPort = data.get( "metaPort" ) getOrElse console.readLine( q( "meta-port" ) )
     val username = data.get( "username" ) getOrElse console.readLine( q( "user" ) )
-    val password = data.get( "password" ) getOrElse console.readLine( q( "password" ) )
+    val password = data.get( "password" ) getOrElse console.readPassword( q( "password" ) )
 
     //we'll use these later
     data.put( "username", username )
+    data.put( "password", password )
     data.put( "metaHost", metaHost )
+    data.put( "metaPort", metaPort )
 
     val config = new HostConfig(
       protocol = "http",
@@ -194,6 +196,10 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
       case Failure(ex) => {
         ex.printStackTrace
         println( "Failed to decompose env path with error : " + ex.getMessage )
+
+        data.remove( "environment" )
+        data.remove( "provider" )
+
         throw new Exception( "Failed to decompose env path with error : " + ex.getMessage )
       }
     }
@@ -220,6 +226,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   def start(input: List[String]): Unit = {
 
+    //this clears any formatting that may have occured to the terminal
     val shutdown = new ShutdownHook
     shutdown.attach()
 
@@ -233,26 +240,42 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
     else
     {
-      fqonSelect
+      try {
+        fqonSelect
+      }
+      catch {
+        case ex : Exception => {
+          println( "Failed to use one-liner config : launching wizard select" )
+          wizardSelect
+        }
+      }
     }
 
     val oid = UUID.fromString( data.get( "org" ).get )
+    val wid = UUID.fromString( data.get( "workspace" ).get )
     val eid = UUID.fromString( data.get( "environment" ).get )
     val pid = UUID.fromString( data.get( "provider" ).get )
 
+    //get the fqon from the org we selected
+    val fqon = meta.topLevelOrgs.get.filter( _.id == oid ).head.properties.get( "fqon" ).as[String]
+
+    /*
     val providers = meta.providers(oid, "environment", eid, Some("Marathon"))
     val providerResource = providers.get.filter(_.id == pid).head
-
     val providerPropertiesJson = providerResource.properties.get.get( "config" ) getOrElse {
       throw new Exception( "Provider instance not well formed" )
     }
-
+    //println( "PROVIDER : " + provider)
     import JsonHelp._
     val providerConfig = parseAs[ProviderConfig]( providerPropertiesJson,  "Provider config not well formed" )
-
     println( "SETTING PROVIDER URL : " + providerConfig.url )
+    */
 
-    val cmd = "dcos config set marathon.url " + providerConfig.url
+    val providerUrl = "http://" + data.get( "username" ).get + ":" + data.get( "password" ).get + "@" + data.get( "metaHost" ).get + ":" + data.get( "metaPort" ).get + "/" + fqon + "/environments/" + eid + "/providers/" + pid + "/"
+
+    println( "Setting providerURL : " + providerUrl )
+
+    val cmd = "dcos config set marathon.url " + providerUrl
 
     try {
       val output = cmd.!!
@@ -265,7 +288,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
         throw new Exception( "Failed to run DCOS" )
       }
     }
-
   }
 
   def pickOrg( index : Int ) : Int = {
@@ -273,8 +295,8 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     val orgdata = mkmap(meta.topLevelOrgs)(o => (o.id -> o.properties.get("fqon").as[String]))
     val oid = DCOSMenu(orgdata, title = Some("Select an Org"), console = console).render.choose()
     println("You chose: " + oid)
-    data.put( "org", oid.toString )
 
+    data.put( "org", oid.toString )
     index + 1
   }
 

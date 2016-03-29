@@ -2,4 +2,5 @@
 *.jar
 target/
 project/
+!project/plugins.sbt
 .idea/
