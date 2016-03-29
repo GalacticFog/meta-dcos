@@ -81,7 +81,7 @@ abstract class Shell(console: Console) {
 class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options : OptionSet) extends Shell(console) {
 
   val dcosBanner = darkgray("""
-'##::::'##'########'########:::'###:::::::::::::::'########::'######::'#######::'######::
+|'##::::'##'########'########:::'###:::::::::::::::'########::'######::'#######::'######::
 | ###::'###:##.....:... ##..:::'## ##:::::::::::::::##.... ##'##... ##'##.... ##'##... ##:
 | ####'####:##::::::::: ##::::'##:. ##::::::::::::::##:::: ##:##:::..::##:::: ##:##:::..::
 | ## ### ##:######::::: ##:::'##:::. ##::'#######:::##:::: ##:##:::::::##:::: ##. ######::
@@ -346,7 +346,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
       val pid = DCOSMenu(providerdata, Some("Select a Provider"), console = console).render.choose()
       println("You chose : " + pid)
       data.put( "provider", pid.toString )
-
       index + 1
     }
   }
@@ -356,12 +355,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     val func = functions.get(currentIndex).get
     val index = func( currentIndex )
 
-    if( data.get( "provider" ).isDefined )
-    {
-      //break out of the loop and don the next thing
-      println( "BREAKING OUT OF THE LOOP!!!" )
-    }
-    else
+    if( !data.get( "provider" ).isDefined )
     {
       process( index )
     }
