@@ -14,6 +14,7 @@ object MetaDCOS extends App {
 		parser.accepts("password").withOptionalArg
 		parser.accepts("meta-hostname").withOptionalArg
 		parser.accepts("meta-port").withOptionalArg
+		parser.accepts("environment").withOptionalArg
 		parser.accepts("provider").withOptionalArg
 
 

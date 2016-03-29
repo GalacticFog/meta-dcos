@@ -94,6 +94,20 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   var data = scala.collection.mutable.Map[String, String]()
   var functions = scala.collection.mutable.Map[Int, (Int) => Int]()
+  val MAX_RETRIES = 5
+
+  //allow a "one liner"
+  if( options.hasArgument( "provider" ) ) data.put( "provider", options.valuesOf( "provider" ).asScala.head.asInstanceOf[String] )
+  if( options.hasArgument( "environment" ) ) data.put( "environment", options.valuesOf( "environment" ).asScala.head.asInstanceOf[String] )
+
+  getMetaOptions
+
+  val meta = initMeta( 0 )
+
+  println(dcosBanner)
+  println("> Welcome, " + data.get( "username" ).get )
+  println("> Bound to: https://" + data.get("metaHost").get )
+
 
   /**
    * Create a Map[T,String] from a Seq of resource instances.
@@ -115,7 +129,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   }
 
 
-  val MAX_RETRIES = 5
   def initMeta( numTries : Int ) : Meta = {
 
     if( numTries > MAX_RETRIES )
@@ -143,7 +156,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     val meta = new Meta(config)
 
     //test the connection here, if it fails we're going to allow the user to manually enter the connection info
-    meta.topLevelOrgs match {
+    meta.self match {
       case Success( s ) => meta
       case Failure( ex ) => {
         println( "FAILED to init meta with the following error : " + ex.getMessage )
@@ -160,18 +173,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   def q(s: String) = s"[${green("?")}] ${s}: "
 
-  //allow a "one liner"
-  if( options.hasArgument( "provider" ) ) data.put( "provider", options.valuesOf( "provider" ).asScala.head.asInstanceOf[String] )
-  if( options.hasArgument( "environment" ) ) data.put( "environment", options.valuesOf( "environment" ).asScala.head.asInstanceOf[String] )
-
-  getMetaOptions
-
-  val meta = initMeta( 0 )
-
-  println(dcosBanner)
-  println("> Welcome, " + data.get( "username" ).get )
-  println("> Bound to: https://" + data.get("metaHost").get )
-
 
   def wizardSelect = {
     val currentIndex = 0
@@ -185,6 +186,36 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   def fqonSelect = {
 
     //do the meta stuff required to select the oid, pid
+    val envPath = data.get( "environment" ).get
+    val providerName = data.get( "provider" ).get
+
+    val results = meta.mapPath( envPath ) match {
+      case Success(s) => s
+      case Failure(ex) => {
+        ex.printStackTrace
+        println( "Failed to decompose env path with error : " + ex.getMessage )
+        throw new Exception( "Failed to decompose env path with error : " + ex.getMessage )
+      }
+    }
+
+    val orgResourceInfo = results.get("org").get
+    val workspaceResourceInfo = results.get("workspace").get
+    val envResourceInfo = results.get("environment").get
+
+    val orgId = orgResourceInfo.id.toString
+    val workId = workspaceResourceInfo.id.toString
+    val envId = envResourceInfo.id.toString
+
+    data.put( "org", orgId )
+    data.put( "workspace", workId )
+    data.put( "environment", envId )
+
+    val providers = meta.providers(UUID.fromString( orgId ), "environment", UUID.fromString( envId ), Some("Marathon"))
+    val provider = providers.get.filter( _.name == providerName ).headOption getOrElse {
+      throw new Exception( "No providers found for path : " + envPath + " with name : " + providerName )
+    }
+
+    data.put( "provider", provider.id.toString )
   }
 
   def start(input: List[String]): Unit = {
@@ -196,7 +227,7 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     console.setPrompt(getPrompt)
 
     //if they passed us a provider, then skip all of this
-    if( !( data.get( "provider" ).isDefined && data.get( "environment").isDefined) )
+    if( !(data.get( "provider" ).isDefined && data.get( "environment").isDefined) )
     {
       wizardSelect
     }
@@ -222,9 +253,18 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     println( "SETTING PROVIDER URL : " + providerConfig.url )
 
     val cmd = "dcos config set marathon.url " + providerConfig.url
-    val output = cmd.!!
 
-    println( "RESULTS : " + output )
+    try {
+      val output = cmd.!!
+      println( "RESULTS : " + output )
+    }
+    catch {
+      case ex : Exception => {
+        println( "FAILED to run DCOS with the following error : " + ex.getMessage )
+        println( "Did you forget to install the dcos app or set your path? - try 'which dcos' ")
+        throw new Exception( "Failed to run DCOS" )
+      }
+    }
 
   }
 
@@ -327,28 +367,6 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     }
   }
 
-  /*
-  def process(input: Option[String]): Unit = {
-    input match {
-      case None => ;
-      case Some("") => ;
-      case Some("exit") => System.exit(0)
-      case Some(in) => {
-        
-
-        val args = parse(in)
-
-        if (controller.hasHandler(args(0))) {    
-          val out = controller.process(CliRequest(args))
-          console.println(out.payload)
-        } else {
-          console.println(s"-gf: ${args(0)}: command not found.")
-        }
-      }
-    }
-  }
-  */
-
   def parse(input: String) = input.split("\\s+")
-  
+
 }
