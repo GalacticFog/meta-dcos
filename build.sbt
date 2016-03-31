@@ -10,6 +10,7 @@ credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")
 
 resolvers ++= Seq(
   "gestalt" at "http://galacticfog.artifactoryonline.com/galacticfog/libs-snapshots-local",
+  "gestalt-releases" at "http://galacticfog.artifactoryonline.com/galacticfog/libs-releases-local",
   "snapshots" at "http://scala-tools.org/repo-snapshots",
   "releases"  at "http://scala-tools.org/repo-releases")
 
