@@ -1,0 +1,25 @@
+{
+  "id": "cli-example-server",
+  "cpus": 0.1,
+  "mem": 128.0,
+  "ports": [0],
+  "instances": 1,
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "nginx",
+      "network": "BRIDGE",
+      "portMappings": [ { "containerPort": 80 } ]
+    }
+  },
+  "healthChecks": [
+  {
+      "protocol": "HTTP",
+      "portIndex": 0,
+      "path": "/",
+      "gracePeriodSeconds": 30,
+      "intervalSeconds": 3,
+      "maxConsecutiveFailures": 10
+    }
+  ]
+}
