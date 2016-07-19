@@ -1,5 +1,6 @@
 package com.galacticfog.gestalt.meta.dcos
 
+import java.net.{MalformedURLException, URL}
 import java.util.UUID
 
 
@@ -8,14 +9,22 @@ import com.galacticfog.gestalt.cli.control._
 import com.galacticfog.gestalt.meta.api.sdk._
 import com.galacticfog.gestalt.cli.Console
 import com.galacticfog.gestalt.cli.ShutdownHook
+import com.galacticfog.gestalt.security.api.{HTTP => sHTTP, HTTPS => sHTTPS, AccessTokenResponse, GestaltToken, GestaltBasicCredentials, GestaltSecurityClient}
+import com.ning.http.client.AsyncHttpClientConfig
+import play.api.http.HeaderNames
 import play.api.libs.json.Json
+import play.api.libs.ws.WSClient
+import play.api.libs.ws.ning.NingWSClient
+import scala.concurrent.Future
 import scala.util.{Success, Failure, Try}
 import joptsimple.OptionSet
 import scala.collection.JavaConverters._
 import com.galacticfog.gestalt.utils.json.JsonUtils._
 import com.galacticfog.gestalt.cli.ShellUtils._
 import sys.process._
-
+import scala.concurrent._
+import scala.concurrent.duration._
+import HeaderNames.WWW_AUTHENTICATE
 
 object AnsiColor {
   val Black = "black"
@@ -37,12 +46,14 @@ object AnsiColor {
   val None = "none"
 }
 
-case class ProviderAuth( scheme : String, username : String, password : String )
-case class ProviderConfig( url : String, auth : ProviderAuth )
-
-object JsonHelp {
-  implicit val providerAuthFormats = Json.format[ProviderAuth]
-  implicit val providerConfigFormats = Json.format[ProviderConfig]
+case class MetaURL(protocol: String, hostname: String, port: Int)
+case object MetaURL {
+  def fromString(urlString: String): Try[MetaURL] = {
+    for {
+      u <- Try{new java.net.URL(urlString)}
+      p = if (u.getPort != -1) u.getPort else u.getDefaultPort
+    } yield MetaURL(u.getProtocol, u.getHost, p)
+  }
 }
 
 abstract class Shell(console: Console) {
@@ -102,12 +113,11 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
 
   getMetaOptions
 
-  val meta = initMeta( 0 )
+  val (meta,self) = initMeta( 0 )
 
   println(dcosBanner)
-  println("> Welcome, " + data.get( "username" ).get )
-  println("> Bound to: https://" + data.get("metaHost").get )
-
+  println("> Welcome, " + self.name )
+  println("> Bound to: " + data.get("metaURL").get )
 
   /**
    * Create a Map[T,String] from a Seq of resource instances.
@@ -122,49 +132,77 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   }
 
   def getMetaOptions = {
-    if ( options.hasArgument( "meta-hostname" ) ) data.put( "metaHost", options.valuesOf( "meta-hostname" ).asScala.head.asInstanceOf[String] )
-    if ( options.hasArgument( "meta-port" ) )     data.put( "metaPort", options.valuesOf( "meta-port" ).asScala.head.asInstanceOf[String] )
+    if ( options.hasArgument( "metaURL" ) )       data.put( "metaURL", options.valuesOf( "metaURL" ).asScala.head.asInstanceOf[String] )
     if ( options.hasArgument( "user" ) )          data.put( "username", options.valuesOf( "user" ).asScala.head.asInstanceOf[String] )
     if ( options.hasArgument( "password" ) )      data.put( "password", options.valuesOf( "password" ).asScala.head.asInstanceOf[String] )
   }
 
+  def getSecurityURLFromMeta(client: WSClient, metaURL: String): Try[String] = {
+    val realmRegex = "realm=\"(.*)\"".r
+    for {
+      response <- Try{ Await.result( client.url(metaURL.stripSuffix("/") + "/users/self").get(), 15.seconds ) }
+      if response.status == 401
+      authResponse <- response.header(WWW_AUTHENTICATE).fold[Try[String]](
+        Failure(new RuntimeException(s"did not receive ${WWW_AUTHENTICATE} response header"))
+      )( Success.apply )
+      realmPart <- authResponse.split(" ").find(_.matches("[Rr]ealm=.*")).fold[Try[String]](
+        Failure(new RuntimeException(s"${WWW_AUTHENTICATE} response header did not indicate realm"))
+      )( Success.apply )
+      realm <- realmRegex.findFirstMatchIn(realmPart).map(_.group(1)).fold[Try[String]](
+        Failure(new RuntimeException(s"${WWW_AUTHENTICATE} response header did not properly format realm"))
+      )( Success.apply )
+    } yield realm
+  }
 
-  def initMeta( numTries : Int ) : Meta = {
+  def initMeta( numTries : Int ): (Meta, ResourceInstance) = {
+
+    val builder = new AsyncHttpClientConfig.Builder()
+    val wsclient  = new NingWSClient(builder.build())
 
     if( numTries > MAX_RETRIES )
     {
       throw new Exception( "Failed to init meta after " + MAX_RETRIES + " tries...")
     }
 
-    val metaHost = data.get( "metaHost" ) getOrElse console.readLine( q( "meta-hostname" ) )
-    val metaPort = data.get( "metaPort" ) getOrElse console.readLine( q( "meta-port" ) )
+    val metaURL  = data.get( "metaURL" )  getOrElse console.readLine( q( "metaURL" ) )
     val username = data.get( "username" ) getOrElse console.readLine( q( "user" ) )
     val password = data.get( "password" ) getOrElse console.readPassword( q( "password" ) )
 
     //we'll use these later
-    data.put( "username", username )
-    data.put( "password", password )
-    data.put( "metaHost", metaHost )
-    data.put( "metaPort", metaPort )
+    data.put( "metaURL", metaURL )
 
-    val config = new HostConfig(
-      protocol = "http",
-      host = metaHost,
-      port = Some( metaPort.toLong ),
-      timeout = 40,
-      creds = Option( new BasicCredential( username = username, password = password ) )
-    )
-
-    val meta = new Meta(config)
+    val meta = for {
+      s <- getSecurityURLFromMeta(wsclient, metaURL)
+      sec <- MetaURL.fromString(s)
+      securitySDK = {
+        println(s"exchanging credentials for authentication token from ${sec.protocol}://${sec.hostname}:${sec.port}")
+        new GestaltSecurityClient(wsclient, if (sec.protocol.equalsIgnoreCase("HTTPS")) sHTTPS else sHTTP, sec.hostname, sec.port, GestaltBasicCredentials("",""))
+      }
+      tokenAttempt <- Try{
+        val maybeToken = Await.result(GestaltToken.grantPasswordToken("root", username, password)(securitySDK), 40.seconds)
+        maybeToken.fold[Try[AccessTokenResponse]](Failure(new RuntimeException("invalid credentials")))(Success.apply)
+      }
+      accessTokenResponse <- tokenAttempt
+      token = accessTokenResponse.accessToken.toString
+      _ = data.put("metaToken", token)
+      metaUrl <- MetaURL.fromString(metaURL)
+      config <- Try{new HostConfig(
+        protocol = metaUrl.protocol,
+        host = metaUrl.hostname,
+        port = Some(metaUrl.port),
+        timeout = 40,
+        creds = Option( new BearerCredential(token) )
+      )}
+    } yield new Meta(config)
 
     //test the connection here, if it fails we're going to allow the user to manually enter the connection info
-    meta.self match {
-      case Success( s ) => meta
+    meta.flatMap(_.self) match {
+      case Success( self ) => (meta.get,self)
       case Failure( ex ) => {
-        println( "FAILED to init meta with the following error : " + ex.getMessage )
+        println( "FAILED to init meta with the following error : " + ex.getClass + ": " + ex.getMessage )
 
-        data.remove( "metaHost" )
-        data.remove( "metaPort" )
+        data.remove( "metaURL" )
+        data.remove( "metaToken" )
         data.remove( "username" )
         data.remove( "password" )
 
@@ -271,15 +309,20 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     println( "SETTING PROVIDER URL : " + providerConfig.url )
     */
 
-    val providerUrl = "http://" + data.get( "username" ).get + ":" + data.get( "password" ).get + "@" + data.get( "metaHost" ).get + ":" + data.get( "metaPort" ).get + "/" + fqon + "/environments/" + eid + "/providers/" + pid + "/"
+    val url = MetaURL.fromString(data("metaURL")).get
+
+    val providerUrl = s"${url.protocol}://" + url.hostname + ":" + url.port + "/" + fqon + "/environments/" + eid + "/providers/" + pid + "/"
 
     println( "Setting providerURL : " + providerUrl )
 
-    val cmd = "dcos config set marathon.url " + providerUrl
+    val cmd1 = "dcos config set marathon.url " + providerUrl
+    val cmd2 = "dcos config set core.dcos_acs_token " + data("metaToken")
 
     try {
-      val output = cmd.!!
-      println( "RESULTS : " + output )
+      val o1 = cmd1.!!
+      println( "RESULTS : " + o1 )
+      val o2 = cmd2.!!
+      println( "RESULTS : " + o2 )
     }
     catch {
       case ex : Exception => {

@@ -21,7 +21,6 @@ object MetaDCOS extends App {
 	val argString = args.mkString( " " )
 	val opts : OptionSet = parser.parse(translate(argString) : _*)
 
-
 	try {
 		args foreach { a => println("arg : " + a) }
 
