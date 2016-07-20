@@ -24,8 +24,7 @@ be prompted to enter the Meta connection info.  You may also pass this connectio
 
 ### CLI Arguments
 
-* meta-host - This is the hostname where the meta instance is located that contains the provider information (e.g. meta.dev.galacticfog.com)
-* meta-port - This is the port used to communicate with the meta instance ( e.g. 80 )
+* meta-url - This is the URL where the meta instance is located that contains the provider information (e.g. `http://meta.dev.galacticfog.com:443`)
 * user - This is the username for the user that will be used to communicate with meta
 * password - The password for the meta user
 * environment - The fully qualified resource name (FQRN) for the environment to use
@@ -33,11 +32,11 @@ be prompted to enter the Meta connection info.  You may also pass this connectio
 
 A one-liner version of the meta-dcos command line execution would look like this :
 
-`./meta-dcos --user=foo --password=bar --meta-host=meta.dev.galacticfog.com --meta-port=80 --environment=pepsi/engineering/dev --provider=PepsiCo-Provider-1`
+`./meta-dcos --user=foo --password=bar --meta-url=https://meta.dev.galacticfog.com --environment=pepsi/engineering/dev --provider=PepsiCo-Provider-1`
 
 If you would like to use the menu to find the org and environment you can leave off those parameters :
 
-`./meta-dcos --user=foo --password=bar --meta-host=meta.dev.galacticfog.com --meta-port=80`
+`./meta-dcos --user=foo --password=bar --meta-url=https://meta.dev.galacticfog.com`
 
 If you would like to use the wizard for all input the minimal invokation would look like this :
 
