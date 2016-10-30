@@ -223,11 +223,13 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
     process( currentIndex )
   }
 
-  def fqonSelect = {
+  def fqonSelect: Unit = {
 
-    //do the meta stuff required to select the oid, pid
+    //do the meta stuff required to select the fqon, pid
     val envPath = data.get( "environment" ).get
     val providerName = data.get( "provider" ).get
+
+    val fqon = envPath.stripPrefix("/").split("/").headOption getOrElse(throw new RuntimeException("environment was not well-formed"))
 
     val results = meta.mapPath( envPath ) match {
       case Success(s) => s
@@ -242,19 +244,17 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
       }
     }
 
-    val orgResourceInfo = results.get("org").get
     val workspaceResourceInfo = results.get("workspace").get
     val envResourceInfo = results.get("environment").get
 
-    val orgId = orgResourceInfo.id.toString
     val workId = workspaceResourceInfo.id.toString
     val envId = envResourceInfo.id.toString
 
-    data.put( "org", orgId )
+    data.put( "fqon", fqon )
     data.put( "workspace", workId )
     data.put( "environment", envId )
 
-    val providers = meta.providers(UUID.fromString( orgId ), "environment", UUID.fromString( envId ), Some("Marathon"))
+    val providers = meta.providers(fqon, "environment", UUID.fromString( envId ), Some("Marathon"))
     val provider = providers.get.filter( _.name == providerName ).headOption getOrElse {
       throw new Exception( "No providers found for path : " + envPath + " with name : " + providerName )
     }
@@ -289,13 +289,10 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
       }
     }
 
-    val oid = UUID.fromString( data.get( "org" ).get )
+    val fqon = data.get( "fqon" ).get
     val wid = UUID.fromString( data.get( "workspace" ).get )
     val eid = UUID.fromString( data.get( "environment" ).get )
     val pid = UUID.fromString( data.get( "provider" ).get )
-
-    //get the fqon from the org we selected
-    val fqon = meta.topLevelOrgs.get.filter( _.id == oid ).head.properties.get( "fqon" ).as[String]
 
     /*
     val providers = meta.providers(oid, "environment", eid, Some("Marathon"))
@@ -334,25 +331,26 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   }
 
   def pickOrg( index : Int ) : Int = {
-
-    val orgdata = mkmap(meta.topLevelOrgs)(o => (o.id -> o.properties.get("fqon").as[String]))
-    val oid = DCOSMenu(orgdata, title = Some("Select an Org"), console = console).render.choose()
-    println("You chose: " + oid)
-
-    data.put( "org", oid.toString )
+    val orgdata = mkmap(meta.topLevelOrgs)(o => {
+      val fqon = o.properties.get("fqon").as[String]
+      fqon -> fqon
+    })
+    val fqon = DCOSMenu(orgdata, title = Some("Select an Org"), console = console).render.choose()
+    println("You chose: " + fqon)
+    data.put( "fqon", fqon )
     index + 1
   }
 
   def pickWorkspace( index : Int ) : Int = {
 
     //TODO : error handling?
-    val oid = data.get( "org" ).get
-    val workspacedata = mkmap(meta.workspaces(UUID.fromString(oid)))(w => (w.id -> w.name))
+    val fqon = data.get( "fqon" ).get
+    val workspacedata = mkmap(meta.workspaces(fqon))(w => (w.id -> w.name))
 
     if( workspacedata.size == 0 )
     {
       println( "Org contains no workspaces, please choose a different org..." )
-      data.remove( "org" )
+      data.remove( "fqon" )
       index - 1
     }
     else
@@ -367,10 +365,10 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   def pickEnvironment( index : Int ) : Int = {
 
     //TODO : error handling?
-    val oid = UUID.fromString( data.get( "org" ).get )
+    val fqon = data.get( "fqon" ).get
     val wid = UUID.fromString( data.get( "workspace" ).get )
 
-    val envdata = mkmap(meta.environments(oid, wid)) { env =>
+    val envdata = mkmap(meta.environments(fqon, wid)) { env =>
       (env.id -> "%s [%s]".format(env.name, env.properties.get("environment_type").as[String]))
     }
 
@@ -392,10 +390,10 @@ class DCOSShell(console: Console, ps1: String = ">", ps2: String = ">>", options
   def pickProvider( index : Int ) : Int = {
 
     //TODO : error handling?
-    val oid = UUID.fromString( data.get( "org" ).get )
+    val fqon = data.get( "fqon" ).get
     val eid = UUID.fromString( data.get( "environment" ).get )
 
-    val providers = meta.providers(oid, "environment", eid, Some("Marathon"))
+    val providers = meta.providers(fqon, "environment", eid, Some("Marathon"))
     val providerdata = mkmap(providers) { p =>
       (p.id -> p.name)
     }
